@@ -5,7 +5,7 @@ checks=checks.map(c=>{let r=c.row||parseInt(String(c.cell||'').replace(/\D/g,'')
 const app=document.getElementById('app'); const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 function save(){localStorage.setItem(K,JSON.stringify(audit))} function saveChecks(){localStorage.setItem(CK,JSON.stringify(checks))}
 function visitId(branch){let d=new Date(),p=n=>String(n).padStart(2,'0');return `${branch}-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`}
-function home(){app.innerHTML=`<div class=card><h2>Branch Audit <span class='small'>PWA V1</span></h2><button onclick="newAudit()">NEW AUDIT</button>${audit?'<button class=secondary onclick="resume()">CONTINUE AUDIT</button>':''}<button class=ghost onclick="manage()">MANAGE CHECKS</button></div><div class=card><h3>Safety controls</h3><div class=ok>Excel import must match the app Branch Code to <b>Index!H2</b>.</div><div class=ok style='margin-top:8px'>Each visit has a unique Visit ID. A previously imported Visit ID must be blocked by Excel.</div></div>`}
+function home(){app.innerHTML=`<div class=card><h2>Branch Audit <span class='small'>PWA V1.1</span></h2><button onclick="newAudit()">NEW AUDIT</button>${audit?'<button class=secondary onclick="resume()">CONTINUE AUDIT</button>':''}<button class=ghost onclick="manage()">MANAGE CHECKS</button></div><div class=card><h3>Safety controls</h3><div class=ok>Excel import must match the app Branch Code to <b>Index!H2</b>.</div><div class=ok style='margin-top:8px'>Each visit has a unique Visit ID. A previously imported Visit ID must be blocked by Excel.</div></div>`}
 function newAudit(){app.innerHTML=`<div class=card><h2>Start New Audit</h2><label>Branch Code</label><input id=branch maxlength=10 placeholder='e.g. FBI' autocapitalize=characters><label>Auditor</label><input id=auditor placeholder='Auditor name'><label>Visit Date</label><input id=date type=date value='${new Date().toISOString().slice(0,10)}'><button onclick="start()">START AUDIT</button><button class=ghost onclick="home()">BACK</button></div>`}
 function start(){let b=document.getElementById('branch').value.trim().toUpperCase(),a=document.getElementById('auditor').value.trim(),d=document.getElementById('date').value;if(!b||!a||!d)return alert('Enter branch code, auditor and date.');audit={branch:b,auditor:a,date:d,visitId:visitId(b),created:new Date().toISOString(),answers:{},completed:false};save();current=0;screen()}
 function resume(){current=0;screen()}
@@ -38,17 +38,46 @@ async function buildAuditFile(){
 }
 async function sendAudit(){
   try{
-    let f=await buildAuditFile(), file=new File([f.blob],f.name,{type:'text/plain'});
-    if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
-      await navigator.share({title:`AutoZone Audit ${audit.branch}`,text:`Branch ${audit.branch} | Visit ${audit.visitId}`,files:[file]});
+    let f=await buildAuditFile();
+    let shareName=`${audit.branch}_${audit.visitId}_AutoZone_Audit.txt`;
+    let shareFile=new File([f.blob],shareName,{type:'text/plain'});
+    if(navigator.share){
+      if(!navigator.canShare || navigator.canShare({files:[shareFile]})){
+        await navigator.share({
+          title:`AutoZone Audit ${audit.branch}`,
+          text:`AutoZone Branch Audit
+Branch: ${audit.branch}
+Visit ID: ${audit.visitId}
+
+Attached audit package for Excel import.`,
+          files:[shareFile]
+        });
+        audit.completed=true;save();
+        return;
+      }
+      // If this browser cannot share files, open the native share sheet with visit details
+      // and keep the audit package safely downloadable.
+      await downloadAudit(false);
+      await navigator.share({
+        title:`AutoZone Audit ${audit.branch}`,
+        text:`AutoZone Branch Audit
+Branch: ${audit.branch}
+Visit ID: ${audit.visitId}
+
+The audit package has been saved to Downloads. Please attach the downloaded .azaudit file to this WhatsApp/email message.`
+      });
       audit.completed=true;save();
-    }else{
-      alert('Your browser cannot share the audit file directly from this local test page. The audit will be downloaded instead. You can then share it from Downloads using WhatsApp or email.');
-      await downloadAudit();
+      return;
     }
-  }catch(e){if(e && e.name==='AbortError')return;alert('Share could not open. The audit will be downloaded as a backup.');await downloadAudit()}
+    await downloadAudit(false);
+    alert('The audit package was saved to Downloads. Share the downloaded .azaudit file using WhatsApp or email.');
+  }catch(e){
+    if(e && e.name==='AbortError') return;
+    await downloadAudit(false);
+    alert('The audit package was saved safely to Downloads. Please share the downloaded .azaudit file using WhatsApp or email.');
+  }
 }
-async function downloadAudit(){let f=await buildAuditFile(),u=URL.createObjectURL(f.blob),a=document.createElement('a');a.href=u;a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);audit.completed=true;save()}
+async function downloadAudit(markComplete=true){let f=await buildAuditFile(),u=URL.createObjectURL(f.blob),a=document.createElement('a');a.href=u;a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);if(markComplete){audit.completed=true;save()}}
 function manage(){app.innerHTML=`<div class=card><h2>Manage Checks</h2><p class=small>Only checks listed here appear in the app. The checklist row links column G (WHAT TO CHECK) and column M (result).</p><div id=clist>${checks.map((c,i)=>`<div class=checkrow><div><b>${esc(c.name)}</b><div class=small>Row ${esc(c.row)} • ${esc(c.taskCell)} → ${esc(c.cell)} • ${esc(c.sheet)}</div></div><button class=danger onclick="delCheck(${i})">DELETE</button></div>`).join('')}</div><button onclick="addCheck()">ADD NEW CHECK</button><button class=ghost onclick="home()">BACK</button></div>`}
 function delCheck(i){if(confirm('Remove this check from the app? Existing audit answers are not deleted.')){checks.splice(i,1);saveChecks();manage()}}
 function addCheck(){app.innerHTML=`<div class=card><h2>Add New Check</h2><div class=small>Enter the information Excel needs before this check can be used.</div><label>Check Name *</label><input id=ncname placeholder='e.g. Safe Key Control'><label>Checklist Row *</label><input id=ncrow type=number min=1 inputmode=numeric placeholder='e.g. 60' oninput="previewNewCheck()"><div id=cellpreview class=ok style='margin-top:10px'>Enter a row to calculate column G and M.</div><label>WHAT TO CHECK / Task Description *</label><textarea id=nctask placeholder='Enter the instruction the auditor must follow...'></textarea><label>Evidence Sheet Name *</label><input id=ncsheet placeholder='e.g. SAFE KEY CHECK'><label><input id=ncphoto type=checkbox style='width:auto;margin-right:8px'> Photo evidence required</label><label><input id=ncnotes type=checkbox style='width:auto;margin-right:8px'> Notes required</label><button onclick="saveNewCheck()">SAVE NEW CHECK</button><button class=ghost onclick="manage()">CANCEL</button></div>`}
