@@ -5,7 +5,7 @@ checks=checks.map(c=>{let r=c.row||parseInt(String(c.cell||'').replace(/\D/g,'')
 const app=document.getElementById('app'); const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 function save(){localStorage.setItem(K,JSON.stringify(audit))} function saveChecks(){localStorage.setItem(CK,JSON.stringify(checks))}
 function visitId(branch){let d=new Date(),p=n=>String(n).padStart(2,'0');return `${branch}-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`}
-function home(){app.innerHTML=`<div class=card><h2>Branch Audit <span class='small'>PWA V1.2</span></h2><button onclick="newAudit()">NEW AUDIT</button>${audit?'<button class=secondary onclick="resume()">CONTINUE AUDIT</button>':''}<button class=ghost onclick="manage()">MANAGE CHECKS</button></div><div class=card><h3>Safety controls</h3><div class=ok>Excel import must match the app Branch Code to <b>Index!H2</b>.</div><div class=ok style='margin-top:8px'>Each visit has a unique Visit ID. A previously imported Visit ID must be blocked by Excel.</div></div>`}
+function home(){app.innerHTML=`<div class=card><h2>Branch Audit <span class='small'>PWA V1.3</span></h2><button onclick="newAudit()">NEW AUDIT</button>${audit?'<button class=secondary onclick="resume()">CONTINUE AUDIT</button>':''}<button class=ghost onclick="manage()">MANAGE CHECKS</button></div><div class=card><h3>Safety controls</h3><div class=ok>Excel import must match the app Branch Code to <b>Index!H2</b>.</div><div class=ok style='margin-top:8px'>Each visit has a unique Visit ID. A previously imported Visit ID must be blocked by Excel.</div></div>`}
 function newAudit(){app.innerHTML=`<div class=card><h2>Start New Audit</h2><label>Branch Code</label><input id=branch maxlength=10 placeholder='e.g. FBI' autocapitalize=characters><label>Auditor</label><input id=auditor placeholder='Auditor name'><label>Visit Date</label><input id=date type=date value='${new Date().toISOString().slice(0,10)}'><button onclick="start()">START AUDIT</button><button class=ghost onclick="home()">BACK</button></div>`}
 function start(){let b=document.getElementById('branch').value.trim().toUpperCase(),a=document.getElementById('auditor').value.trim(),d=document.getElementById('date').value;if(!b||!a||!d)return alert('Enter branch code, auditor and date.');audit={branch:b,auditor:a,date:d,visitId:visitId(b),created:new Date().toISOString(),answers:{},completed:false};save();current=0;screen()}
 function resume(){current=0;screen()}
@@ -72,20 +72,22 @@ async function buildShareZip(){
 
 async function sendAudit(){
   try{
-    const f=await buildShareZip();
-    const shareFile=new File([f.blob],f.name,{type:'application/zip'});
+    const f=await buildAuditFile();
+    const shareName=`${audit.branch}_${audit.visitId}_AutoZone_Audit.txt`;
+    const shareFile=new File([f.blob],shareName,{type:'text/plain'});
     if(navigator.share && (!navigator.canShare || navigator.canShare({files:[shareFile]}))){
       await navigator.share({
         title:`AutoZone Audit ${audit.branch}`,
         text:`AutoZone Branch Audit
 Branch: ${audit.branch}
-Visit ID: ${audit.visitId}`,
+Visit ID: ${audit.visitId}
+
+Attached audit package for Excel import.`,
         files:[shareFile]
       });
       audit.completed=true;save();return;
     }
-    const u=URL.createObjectURL(f.blob),a=document.createElement('a');
-    a.href=u;a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);
+    await downloadAudit(false);
     if(navigator.share){
       await navigator.share({
         title:`AutoZone Audit ${audit.branch}`,
@@ -93,13 +95,16 @@ Visit ID: ${audit.visitId}`,
 Branch: ${audit.branch}
 Visit ID: ${audit.visitId}
 
-The ZIP audit package was saved to Downloads. Please attach that ZIP to this WhatsApp/email message.`
+The audit backup has been saved to Downloads. Please attach the downloaded .azaudit file.`
       });
-    }else alert('The ZIP audit package was saved to Downloads. Please attach it to WhatsApp or email.');
+    }else{
+      alert('The audit backup was saved to Downloads. Please share the downloaded .azaudit file.');
+    }
     audit.completed=true;save();
   }catch(e){
     if(e&&e.name==='AbortError') return;
-    alert('The ZIP could not be shared. Please use DOWNLOAD BACKUP so the audit remains safe.');
+    await downloadAudit(false);
+    alert('The audit backup was saved safely to Downloads. Please share the downloaded .azaudit file.');
   }
 }
 async function downloadAudit(markComplete=true){let f=await buildAuditFile(),u=URL.createObjectURL(f.blob),a=document.createElement('a');a.href=u;a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);if(markComplete){audit.completed=true;save()}}
